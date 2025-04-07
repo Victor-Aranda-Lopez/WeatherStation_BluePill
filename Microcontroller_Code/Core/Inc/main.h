@@ -40,7 +40,7 @@ extern "C" {
 struct Measure{
     float temperature;
     float humidity;
-    uint32_t batteryPerc;
+    uint32_t battery;
 };
 /* USER CODE END ET */
 

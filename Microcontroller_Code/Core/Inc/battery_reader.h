@@ -8,8 +8,7 @@
 //Battery reader functionality is not yet implemented//
 ///////////////////////////////////////////////////////
 
-#define ENABLE_BATTERY_READER 0
-#if ENABLE_BATTERY_READER
+
 #ifndef INC_BATTERYREADER_H_
 #define INC_BATTERYREADER_H_
 
@@ -18,11 +17,13 @@
 class BatteryReader {
 public:
 	BatteryReader();
+	void initBatteryLevel(ADC_HandleTypeDef hadc1);
 	uint32_t getBatteryLevel();
+private:
+	ADC_HandleTypeDef battery_hadc1;
 };
 
 
 
 #endif /* INC_BATTERYREADER_H_ */
 
-#endif

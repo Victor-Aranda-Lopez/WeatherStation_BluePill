@@ -1,27 +1,28 @@
 #include "utilfunctions.h"
-#include <stdio.h>
-#include <ctype.h>
 #include "stm32f1xx.h"
-#include <vector>
-#include <string.h>
-#include "BatteryReader.h"
 using namespace std;
+
+/*----------------------------------------------------------
+ * Elements to configure before connecting to server
+ */
+//MQTT server configuration
+char * mqtt_server = "1.2.3.4"; //dns or ip
+char * mqtt_server_port = "1234";
+
+// Write MQTT topic where data is published
+char * topic = "mqttdemo";
+//------------------------------------------------------
+
 
 extern Measure measures;
 extern SIM900A sim900a;
-extern AM2321 tempHumSensor;
 extern bool takeMeasureBool;
-extern char* toPrint;
-extern int secondsToWait;
 extern long nextMeasureTimeSeconds;
 extern long currentTimeSeconds;
-extern bool startNewSeriesOfMeasurements ;
 extern UART_HandleTypeDef huart2;
 extern RTC_HandleTypeDef hrtc;
 
-#define PAYLOAD_HEADER_LENGHT 6
-#define MOCK_MEASURES 0
-#define DEFAULT_WAIT_TIME_NO_SERVER_RESPONSE_SECONDS 15
+#define DEFAULT_WAIT_TIME_NEXT_MEASURE 5
 
 void initDebugLED(){
 	  GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -38,91 +39,31 @@ void initDebugLED(){
 void toggleDebugLED(){
 	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
-void DebugPrint(const char *text)
-{
-  HAL_UART_Transmit(&huart2, (uint8_t *)text, strlen(text), 100U);
+/*
+ * Creates json based on all measures made.
+ * Modify it for you needs.
+ */
+void createMessage (char* buf, Measure measures) {
+    char s_message[60]={0};
+    strcat (s_message, "{\"temperature\":");
+    char con[8];
+    snprintf(con,sizeof(con), "%.4f", measures.temperature);
+    strcat (s_message, con);
+    strcat (s_message, ",\"humidity\":");
+    snprintf(con,sizeof(con), "%.4f", measures.humidity);
+    strcat (s_message, con);
+    strcat (s_message, ",\"battery\":");
+    snprintf(con,sizeof(con), "%ld", measures.battery);
+    strcat (s_message, con);
+    strcat (s_message, "}");
+
+    strcpy(buf,s_message);
 }
-void DebugPrint(string text)
-{
-  HAL_UART_Transmit(&huart2, (uint8_t *)text.c_str(), text.size(), 100U);
-}
-string createMessage (Measure measures, bool newSeriesOfMeasurements = false) {
-	char payload[50];
-	int lenght_payload = snprintf(payload, sizeof(payload),"%d;%d", (int)(measures.temperature*10),(int)(measures.humidity*10));
 
-    char s_message[50];
-    s_message[0]='0';
-    s_message[1]='1';
-    char lenght_buffer[6];
-    snprintf(lenght_buffer,sizeof(lenght_buffer),"%04d",lenght_payload);
-    strncat (&s_message[2], &lenght_buffer[0], sizeof(lenght_buffer));
-    strncat (&s_message[6], &payload[0], lenght_payload);
-    string out_string = s_message;
-
-    DebugPrint("ss_message: ");
-    DebugPrint(out_string.c_str());
-    DebugPrint("\r\n");
-    return s_message;
-}
-bool processResponse(string response) {
-    if(response.length()==0)//TODO: more checks
-        return false;
-
-    int payloadLenght = atoi(response.substr(2,4).c_str());
-    if(payloadLenght==0)
-        return false;
-    string payload = response.substr(PAYLOAD_HEADER_LENGHT,PAYLOAD_HEADER_LENGHT+payloadLenght);
-
-    std::vector<std::string> seglist;
-    seglist = splitStringByDelimiter(payload,";");//%3B
-    for(int i=0;i<(int)seglist.size();i++) {
-        if(i==0) {//Current time
-			char * pEnd;
-			currentTimeSeconds = strtol(seglist[0].c_str(), &pEnd, 10);
-        }
-        if(i==1) {//Next measure
-            char * pEnd;
-            nextMeasureTimeSeconds = strtol(seglist[1].c_str(), &pEnd, 10);
-        }
-    }
-    return true;
-}
-bool sendMeasuresToServerAndSync (Measure measures) {
-    if(sim900a.connectToServer()){
-    	DebugPrint("Connected to server\r\n");
-    }else{
-    	DebugPrint("ERROR: Not connected to server\r\n");
-        return false;
-    }
-
-    DebugPrint("Reading temp and hum...\r\n");
-    string message_s = createMessage(measures).c_str();
-
-    DebugPrint("Sending: ");
-    DebugPrint(message_s.c_str());
-    DebugPrint("\r\n");
-    if(sim900a.sendPayload(message_s)){
-        DebugPrint("Sent payload to server\r\n");
-    }else{
-        DebugPrint("ERROR: payload not sent to server\r\n");
-        return false;
-    }
-    //Wait seconds for server response is made
-    HAL_Delay(4000);
-    //Response
-    processResponse(sim900a.getLastResponse());//"0000211701515024;1701518400"
-    //Disconnect
-    HAL_Delay(500);
-    if (sim900a.disconnect()){
-        DebugPrint("Disconnected from to server\r\n\r\n");
-    }else{
-        DebugPrint("ERROR: Not disconnected from server\r\n\r\n");
-    }
-    if (nextMeasureTimeSeconds != 0 && currentTimeSeconds != 0) {
-    	return true;
-    }else{
-    	return false;
-    }
+bool sendMeasuresToServer (Measure measures) {
+	char payload[60];
+	createMessage(payload,measures);
+	return sim900a.MQTT_publish_payload(mqtt_server, mqtt_server_port, topic, payload);
 }
 
 void sleepForNextMeasure() {
@@ -131,11 +72,7 @@ void sleepForNextMeasure() {
    /* Clear wakeup flag */
    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
 
-  if(nextMeasureTimeSeconds == 0) {
-      nextMeasureTimeSeconds = DEFAULT_WAIT_TIME_NO_SERVER_RESPONSE_SECONDS;
-  }
 	HAL_RTC_WaitForSynchro(&hrtc);
-	int secondsSleeping = (nextMeasureTimeSeconds-currentTimeSeconds);
 	RTC_TimeTypeDef  stimestructure;
 	RTC_DateTypeDef sDate;
 	RTC_AlarmTypeDef salarmstructure;
@@ -158,6 +95,8 @@ void sleepForNextMeasure() {
 	}
 
   /* Set Alarm - RTC Alarm Generation: Alarm on Hours, Minutes and Seconds */
+	int secondsSleeping = DEFAULT_WAIT_TIME_NEXT_MEASURE;
+
 	int h(secondsSleeping/3600);
 	int min(secondsSleeping/60 - h*60);
 	int sec(secondsSleeping - (h*60 + min)*60);
@@ -169,26 +108,8 @@ void sleepForNextMeasure() {
   {
     Error_Handler();
   }
-    DebugPrint("Entering in STANDBY mode\r\n");
     HAL_SuspendTick();
     HAL_PWR_EnterSTANDBYMode();
-}
-
-vector<string> splitStringByDelimiter(string s,char* delimiter){
-    vector<string> res;
-    int pos = 0;
-    while(pos < sizeof(s)){
-        pos = s.find(delimiter);
-        res.push_back(s.substr(0,pos));
-        s.erase(0,pos+1); // +3 3 is the length of the delimiter, "%20"
-    }
-    return res;
-}
-
-void configRetrialOfConnection(){
-	//Rest time to 0 to indicate that connection to server failed
-	//So, when config standby, it will only sleep DEFAULT_WAIT_TIME_NO_SERVER_RESPONSE_SECONDS
-	currentTimeSeconds = 0;
 }
 
 //Activates peripherals at 5V
@@ -212,6 +133,10 @@ void enablePeripherals(){
 }
 void disablePeripherals(){
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+
+	  // __HAL_RCC_GPIOA_FORCE_RESET();
+	  // __HAL_RCC_GPIOB_FORCE_RESET();
+	  // __HAL_RCC_GPIOC_FORCE_RESET();
 	  __HAL_RCC_GPIOC_CLK_DISABLE();
 	  __HAL_RCC_GPIOA_CLK_DISABLE();
 	  __HAL_RCC_GPIOB_CLK_DISABLE();

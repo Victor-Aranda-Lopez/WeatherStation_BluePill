@@ -21,32 +21,20 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <AM2321.h>
 #include <sim900a.h>
 #include <utilfunctions.h>
-#include <cstdio>
-#include <string.h>
-#include <vector>
 #include <time.h>
 #include "stm32f1xx.h"
-#include "BatteryReader.h"
-#define PAYLOAD_HEADER_LENGHT 14
+#include <am2320.h>
+#include <battery_reader.h>
 #define MAX_MEASURE_RETRIES 5
+#define MAX_MQTT_PUBLISH_RETRIES 3
+#define AM2320_I2C_ADDR = 0x5C<<1;
 using namespace std;
-bool takeMeasureBool = false;
-char toPrint[500];
-int secondsToWait;
-long nextMeasureTimeSeconds = 0;
-long currentTimeSeconds = 0;
-bool startNewSeriesOfMeasurements = false;
-extern char x;
-extern string result;
 Measure measures;
-uint8_t rxData[8];
-char my_uart_buffer[RX_GPRS_BUFFER_SIZE];
-int my_uart_buffer_index = 0;
 SIM900A sim900a;
-AM2321 tempHumSensor;
+BatteryReader bateryReader;
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -66,7 +54,7 @@ AM2321 tempHumSensor;
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-
+ADC_HandleTypeDef hadc1;
 RTC_HandleTypeDef hrtc;
 
 UART_HandleTypeDef huart1;
@@ -83,6 +71,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_RTC_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -124,16 +113,22 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_RTC_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   //Init
    if (__HAL_PWR_GET_FLAG(PWR_FLAG_SB) != RESET)
    {
-   __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
-   __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+	   __HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
+	   __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
    }
    HAL_PWR_EnableBkUpAccess();
 
    enablePeripherals();
+   HAL_Delay(1000);
+
+   Am2320_HandleTypeDef Am2320_;
+   bateryReader.initBatteryLevel(hadc1);
+   Am2320_ = am2320_Init(&hi2c1,AM2320_ADDRESS);
    measures.humidity = -1;
    measures.temperature = -300;
    //Make measurement
@@ -142,28 +137,31 @@ int main(void)
 		if(measurementTries) {// Wait if it is a retry
 			HAL_Delay(1000);
 		}
-		tempHumSensor.poll();
-		measures.humidity = tempHumSensor.getHumidity();
-		measures.temperature = tempHumSensor.getTemperature();
+		float temperature, humidity;
+		am2320_GetTemperatureAndHumidity(&Am2320_, &temperature, &humidity);
+		measures.humidity = humidity;
+		measures.temperature = temperature;
+		measures.battery = bateryReader.getBatteryLevel();//45 por ajuste de error (con condensador). Sin condensador son 30
 		measurementTries++;
+		//If measure is wrong, then retry up to MAX_MEASURE_RETRIES
 	} while((measures.humidity == 0 || measures.temperature == 0) && measurementTries < MAX_MEASURE_RETRIES);
 
 	//Config GSM
    if(sim900a.init()){
-	   DebugPrint("GSM started\r\n");
-   } else {
-	   DebugPrint("ERROR:GSM not started\r\n");
+	   // GSM started
+	   int publish_Tries = 0;
+	   //Send measurement to server
+	   while(!sendMeasuresToServer(measures) && publish_Tries < MAX_MQTT_PUBLISH_RETRIES){
+		   HAL_Delay(3000);
+		   publish_Tries++;
+	   }
    }
-   //Send measurement to server
-   if(sendMeasuresToServerAndSync(measures)) {
-	   DebugPrint("Measures sent to server, successfully\r\n");
-   } else {
-	   configRetrialOfConnection();
-	   DebugPrint("ERROR: Measures not sent to server\r\n");
-   }
+
    //Disconnect and finish
    sim900a.shutdown();
+
    disablePeripherals();
+
    sleepForNextMeasure();
    /* USER CODE END 2 */
 
@@ -220,6 +218,52 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+/**
+ * @brief ADC1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_ADC1_Init(void)
+{
+
+ /* USER CODE BEGIN ADC1_Init 0 */
+
+ /* USER CODE END ADC1_Init 0 */
+
+ ADC_ChannelConfTypeDef sConfig = {0};
+
+ /* USER CODE BEGIN ADC1_Init 1 */
+
+ /* USER CODE END ADC1_Init 1 */
+
+ /** Common config
+ */
+ hadc1.Instance = ADC1;
+ hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+ hadc1.Init.ContinuousConvMode = ENABLE;
+ hadc1.Init.DiscontinuousConvMode = DISABLE;
+ hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+ hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+ hadc1.Init.NbrOfConversion = 1;
+ if (HAL_ADC_Init(&hadc1) != HAL_OK)
+ {
+   Error_Handler();
+ }
+
+ /** Configure Regular Channel
+ */
+ sConfig.Channel = ADC_CHANNEL_0;
+ sConfig.Rank = ADC_REGULAR_RANK_1;
+ sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
+ if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+ {
+   Error_Handler();
+ }
+ /* USER CODE BEGIN ADC1_Init 2 */
+
+ /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
@@ -412,14 +456,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//This is required to  process incoming RX from GSM module and store it in my_uart_buffer
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-	  if (isprint(*rxData)!=0 || *rxData=='\r' || *rxData=='\n') {
-		  my_uart_buffer[my_uart_buffer_index++] = *rxData;
-	  }
-	  HAL_UART_Receive_IT(&huart1, rxData, 1);
-}
 
 /* USER CODE END 4 */
 
