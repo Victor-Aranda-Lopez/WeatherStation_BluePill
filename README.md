@@ -29,7 +29,7 @@ Finally, after transmitting the payload, SIM900A module is powered off, and the 
 It is implementred MQTT 3 using usign either cliendID or pair user and password as credentials with the server
 Refer to https://github.com/eclipse-paho/paho.mqtt.embedded-c/tree/master/MQTTPacket for more details, and in sim900a.cpp file, MQTT_publish_payload method
 ## Results in Thing ThingsBoard
-In ![Images/ThingsBoard data.png](https://test), you can find the data received by the server, and ready to be processed.
+In ![Images/ThingsBoard data.png](https://github.com/Victor-Aranda-Lopez/WeatherStation_BluePill/blob/main/Images/ThingsBoard%20data.png), you can find the data received by the server, and ready to be processed.
 
 ## Other characteristics
  - Mote uses standby HAL function to sleep using the least amount of energy (I measured 40uA)
