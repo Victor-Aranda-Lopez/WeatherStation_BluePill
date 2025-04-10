@@ -7,6 +7,8 @@ Here I have created a simplification of that system with only 1 mote and the ser
 
     Mote    <--   2G  -->    Server   
     
+![main image](https://github.com/Victor-Aranda-Lopez/WeatherStation_BluePill/blob/main/Images/microcontroller%20with%20battery.jpg)
+
 ## Technologies used
 - Stm32CubeIde - IDE to program the motes. (Side note: I tried many others like MbedStudio, uKeil, PlatformIO IDE but Stm32CubeIde allows much more flexibility, specially to archive low consumption)
 - C++ -->  Programming language for the motes
@@ -29,8 +31,8 @@ Finally, after transmitting the payload, SIM900A module is powered off, and the 
 It is implementred MQTT 3 using usign either cliendID or pair user and password as credentials with the server
 Refer to https://github.com/eclipse-paho/paho.mqtt.embedded-c/tree/master/MQTTPacket for more details, and in sim900a.cpp file, MQTT_publish_payload method
 ## Results in Thing ThingsBoard
-In ![Images/ThingsBoard data.png](https://github.com/Victor-Aranda-Lopez/WeatherStation_BluePill/blob/main/Images/ThingsBoard%20data.png), you can find the data received by the server, and ready to be processed.
-
+In [Images/ThingsBoard data.png](https://github.com/Victor-Aranda-Lopez/WeatherStation_BluePill/blob/main/Images/ThingsBoard%20data.png), you can find the data received by the server, and ready to be processed.
+![Images/ThingsBoard data.png](https://github.com/Victor-Aranda-Lopez/WeatherStation_BluePill/blob/main/Images/ThingsBoard%20data.png)
 ## Other characteristics
  - Mote uses standby HAL function to sleep using the least amount of energy (I measured 40uA)
  - Code checks that the SIM900A has connected to the network, and if it has establed TCP connection with the MQTT server, but it doesn't confirm if the MQTT payloads where received and processed by the server. See SIM900A::MQTT_publish_payload function comments.
