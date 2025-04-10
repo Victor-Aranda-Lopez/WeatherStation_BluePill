@@ -5,7 +5,6 @@ This project is a simple proof of concept for a IoT weather sensor system that c
 
 Here I have created a simplification of that system with only 1 mote and the server. The motes use GSM (2G) technology because it is simpler, less enegy consuming, low data traffic is used, and 5G modules for IoT/microcontrollers are too expensive currently and 5G coverage is not widespread.
 
-   
     Mote    <--   2G  -->    Server   
     
 ## Technologies used
@@ -23,10 +22,15 @@ A json payload with temperature, humidity and battery level is transmitted to th
 
 Finally, after transmitting the payload, SIM900A module is powered off, and the mote will sleep using standby mode of STM32F103C8T6 for a fixed amount of time before repeating the process in a new weather measurement.
 ## Mote hardware
-//TODO
+2 schemas have been uploaded to the Schema folder. 
+- schema simple.pdf: it has been implemented and useful for testing environments, but nit for produccion since the battery is directly connected to the microcontorller and GSM module which will drain the battery and damage it it there is no undervoltage protection. You can see the photos of this schema in Images folder. Note: a capacitor has been aded parallel to R4 but it doesn't improve the accuracy.
+- schema with solar charger module.pdf: suggested production schema with a module to automatically charge the battery with a solar panel and control the battery and protect it from overdischarge or overcharge.
 ## MQTT Application protocol
 It is implementred MQTT 3 using usign either cliendID or pair user and password as credentials with the server
 Refer to https://github.com/eclipse-paho/paho.mqtt.embedded-c/tree/master/MQTTPacket for more details, and in sim900a.cpp file, MQTT_publish_payload method
+## Results in Thing ThingsBoard
+In ![Images/ThingsBoard data.png](https://test), you can find the data received by the server, and ready to be processed.
+
 ## Other characteristics
  - Mote uses standby HAL function to sleep using the least amount of energy (I measured 40uA)
  - Code checks that the SIM900A has connected to the network, and if it has establed TCP connection with the MQTT server, but it doesn't confirm if the MQTT payloads where received and processed by the server. See SIM900A::MQTT_publish_payload function comments.
